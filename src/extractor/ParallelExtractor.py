@@ -1,25 +1,25 @@
 import sys
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from queue import Queue
 from threading import Event
 
 import pandas as pd
 
-from database_connector.DatabaseConnection import DatabaseConnection
+from database_connector.ClickHouseConnection import ClickHouseConnection
 from extractor.ExecutionConfig import ExecutionConfig
 from extractor.QueryChunk import QueryChunk
-from extractor.ResultCollector import ResultCollector
-from extractor.ResultQueue import ResultQueue
 from extractor.ThreadWorker import ThreadWorker
 from query.QueryBuilder import QueryBuilder
 from request.ExtractionRequest import ExtractionRequest
 from time_chunks.ChunkGenerator import ChunkGenerator
+from time_chunks.TimeChunk import TimeChunk
 
 
 class ParallelExtractor:
     def __init__(
         self,
-        connection_factory,
+        connection_factory: Callable[[], ClickHouseConnection],
         execution_config: ExecutionConfig | None = None,
         chunk_generator: ChunkGenerator | None = None,
         query_builder: QueryBuilder | None = None,
@@ -69,7 +69,7 @@ class ParallelExtractor:
             len(query_chunks),
         )
         query_queue: Queue[QueryChunk] = Queue()
-        result_queue = ResultQueue()
+        result_queue: Queue[pd.DataFrame] = Queue()
         stop_event = Event()
 
         for query_chunk in query_chunks:
@@ -89,7 +89,7 @@ class ParallelExtractor:
 
             try:
                 for worker_index in range(worker_count):
-                    connection: DatabaseConnection = self.connection_factory()
+                    connection = self.connection_factory()
                     worker = ThreadWorker(
                         connection=connection,
                         result_queue=result_queue,
@@ -127,18 +127,13 @@ class ParallelExtractor:
             f"Объединяю результаты {len(query_chunks)} чанков в DataFrame...",
             flush=True,
         )
-        collector = ResultCollector(
-            result_queue=result_queue,
-        )
-
-        return collector.collect(
-            result_count=len(query_chunks),
-        )
+        dataframes = [result_queue.get_nowait() for _ in query_chunks]
+        return pd.concat(dataframes, ignore_index=True)
 
     def _build_query_chunks(
         self,
         query: str,
-        chunks,
+        chunks: list[TimeChunk],
     ) -> list[QueryChunk]:
 
         query_chunks: list[QueryChunk] = []

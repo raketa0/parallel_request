@@ -4,16 +4,17 @@ from queue import Empty, Queue
 from threading import Event
 from time import perf_counter
 
-from database_connector.DatabaseConnection import DatabaseConnection
+import pandas as pd
+
+from database_connector.ClickHouseConnection import ClickHouseConnection
 from extractor.QueryChunk import QueryChunk
-from extractor.ResultQueue import ResultQueue
 
 
 class ThreadWorker:
     def __init__(
         self,
-        connection: DatabaseConnection,
-        result_queue: ResultQueue,
+        connection: ClickHouseConnection,
+        result_queue: Queue[pd.DataFrame],
         worker_id: int = 1,
     ) -> None:
         self.connection = connection
@@ -58,8 +59,6 @@ class ThreadWorker:
                 except Exception:
                     stop_event.set()
                     raise
-                finally:
-                    query_queue.task_done()
 
         except Exception as error:
             worker_error = error

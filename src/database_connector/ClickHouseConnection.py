@@ -1,27 +1,21 @@
+import clickhouse_connect
 import pandas as pd
 
-try:
-    import clickhouse_connect
-except ModuleNotFoundError:  # Позволяет использовать только MSSQL без ClickHouse.
-    clickhouse_connect = None
-
 from database_connector.DatabaseConfig import DatabaseConfig
-from database_connector.DatabaseConnection import DatabaseConnection
 
 
-class ClickHouseConnection(DatabaseConnection):
+class ClickHouseConnection:
     def __init__(self, config: DatabaseConfig) -> None:
-        super().__init__(config)
+        self.config = config
+        self.connection = None
+
+    @property
+    def label(self) -> str:
+        return f"{self.config.host}:{self.config.port}"
 
     def connect(self) -> None:
         if self.connection is not None:
             return
-
-        if clickhouse_connect is None:
-            raise RuntimeError(
-                "Для подключения к ClickHouse установите зависимость "
-                "clickhouse-connect: python -m pip install clickhouse-connect"
-            )
 
         self.connection = clickhouse_connect.get_client(
             host=self.config.host,
@@ -60,6 +54,13 @@ class ClickHouseConnection(DatabaseConnection):
         if self.connection is not None:
             self.connection.close()
             self.connection = None
+
+    def __enter__(self) -> "ClickHouseConnection":
+        self.connect()
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        self.close()
 
     @staticmethod
     def _prepare_query(query: str) -> str:

@@ -1,7 +1,4 @@
 from extractor.ExecutionConfig import ExecutionConfig
 from extractor.QueryChunk import QueryChunk
-from extractor.ChunkDistributor import ChunkDistributor
-from extractor.ResultQueue import ResultQueue
 from extractor.ThreadWorker import ThreadWorker
-from extractor.ResultCollector import ResultCollector
 from extractor.ParallelExtractor import ParallelExtractor
