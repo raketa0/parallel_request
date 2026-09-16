@@ -1,9 +1,10 @@
 import pandas as pd
+
 from extractor.ResultQueue import ResultQueue
+
 
 class ResultCollector:
     def __init__(self, result_queue: ResultQueue) -> None:
-
         self.result_queue = result_queue
 
     def collect(self, result_count: int) -> pd.DataFrame:

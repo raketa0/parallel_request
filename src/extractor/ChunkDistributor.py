@@ -1,5 +1,5 @@
-from chunk.TimeChunk import TimeChunk
 from extractor.QueryChunk import QueryChunk
+from time_chunks.TimeChunk import TimeChunk
 
 
 class ChunkDistributor:

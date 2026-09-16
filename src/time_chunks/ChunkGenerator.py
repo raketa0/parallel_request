@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 
-from chunk.TimeChunk import TimeChunk
-from chunk.TimeChunkType import TimeChunkType
+from time_chunks.TimeChunk import TimeChunk
+from time_chunks.TimeChunkType import TimeChunkType
 
 
 class ChunkGenerator:
@@ -21,6 +21,11 @@ class ChunkGenerator:
                 )
             case TimeChunkType.MONTH:
                 return self._generate_month_chunks(
+                    start_date,
+                    end_date,
+                )
+            case TimeChunkType.WEEK:
+                return self._generate_week_chunks(
                     start_date,
                     end_date,
                 )
@@ -121,6 +126,29 @@ class ChunkGenerator:
             chunk_end = min(next_date, end_date)
 
             chunks.append(TimeChunk(number=number, start_date=current, end_date=chunk_end))
+
+            current = chunk_end
+            number += 1
+
+        return chunks
+
+    @staticmethod
+    def _generate_week_chunks(start_date: datetime, end_date: datetime) -> list[TimeChunk]:
+        chunks: list[TimeChunk] = []
+
+        current = start_date
+        number = 1
+
+        while current < end_date:
+            chunk_end = min(current + timedelta(days=7), end_date)
+
+            chunks.append(
+                TimeChunk(
+                    number=number,
+                    start_date=current,
+                    end_date=chunk_end,
+                )
+            )
 
             current = chunk_end
             number += 1

@@ -1,5 +1,5 @@
-from chunk.TimeChunk import TimeChunk
 from query.QueryParameters import QueryParameters
+from time_chunks.TimeChunk import TimeChunk
 
 
 class QueryBuilder:
@@ -22,3 +22,9 @@ class QueryBuilder:
 
         if "{end_date}" not in query:
             raise ValueError("SQL-запрос должен содержать параметр {end_date}.")
+
+        for parameter in ("{start_date}", "{end_date}"):
+            if f"'{parameter}'" in query:
+                raise ValueError(
+                    f"Параметр {parameter} должен использоваться без кавычек."
+                )

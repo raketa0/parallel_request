@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 
-from chunk.TimeChunkType import TimeChunkType
+from time_chunks.TimeChunkType import TimeChunkType
 
 
 @dataclass(frozen=True)

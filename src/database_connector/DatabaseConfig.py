@@ -3,6 +3,16 @@ from dataclasses import dataclass
 from dotenv import load_dotenv
 
 
+THEATRE_RU_HOST = "mv1-bfa-ch.travelline.wan"
+THEATRE_RU_HOSTS = (
+    "sv1-bfa-ch.travelline.wan",
+    "mv1-bfa-ch.travelline.wan",
+    "mv2-bfa-ch.travelline.wan",
+)
+THEATRE_RU_PORT = 8123
+THEATRE_RU_DATABASE = "BookingFormAnalyticsV2"
+
+
 @dataclass(frozen=True)
 class DatabaseConfig:
     database_type: str
@@ -14,12 +24,16 @@ class DatabaseConfig:
     connection_timeout: int = 30
     query_timeout: int = 300
     driver: str | None = None
+    encrypt: bool = True
+    trust_server_certificate: bool = False
+    secure: bool = False
+    verify: bool = True
 
     @classmethod
     def from_env(cls, database_type: str) -> "DatabaseConfig":
         load_dotenv()
 
-        database_type = database_type.lower()
+        database_type = database_type.strip().lower()
 
         if database_type == "mssql":
             return cls._from_mssql_env()
@@ -27,7 +41,7 @@ class DatabaseConfig:
         if database_type == "clickhouse":
             return cls._from_clickhouse_env()
 
-        raise ValueError( f"Неизвестный тип базы данных: {database_type}")
+        raise ValueError(f"Неизвестный тип базы данных: {database_type}")
 
     @classmethod
     def _from_mssql_env(cls) -> "DatabaseConfig":
@@ -41,19 +55,26 @@ class DatabaseConfig:
             connection_timeout=cls._get_int_env("MSSQL_CONNECTION_TIMEOUT", 30),
             query_timeout=cls._get_int_env("MSSQL_QUERY_TIMEOUT", 300),
             driver=os.getenv("MSSQL_DRIVER", "ODBC Driver 18 for SQL Server"),
+            encrypt=cls._get_bool_env("MSSQL_ENCRYPT", True),
+            trust_server_certificate=cls._get_bool_env(
+                "MSSQL_TRUST_SERVER_CERTIFICATE",
+                False,
+            ),
         )
 
     @classmethod
     def _from_clickhouse_env(cls) -> "DatabaseConfig":
         return cls(
             database_type="clickhouse",
-            host=cls._get_required_env("CLICKHOUSE_HOST"),
-            port=cls._get_int_env("CLICKHOUSE_PORT", 8123),
-            database=cls._get_required_env("CLICKHOUSE_DATABASE"),
-            username=cls._get_required_env("CLICKHOUSE_USERNAME"),
-            password=cls._get_required_env("CLICKHOUSE_PASSWORD"),
-            connection_timeout=cls._get_int_env("CLICKHOUSE_CONNECTION_TIMEOUT", 30),
-            query_timeout=cls._get_int_env("CLICKHOUSE_QUERY_TIMEOUT", 300)
+            host=THEATRE_RU_HOST,
+            port=THEATRE_RU_PORT,
+            database=THEATRE_RU_DATABASE,
+            username=cls._get_required_env("THEATRE_LOGIN_RU"),
+            password=cls._get_required_env("THEATRE_PASS_RU"),
+            connection_timeout=30,
+            query_timeout=300,
+            secure=False,
+            verify=True,
         )
 
     @staticmethod
@@ -86,3 +107,23 @@ class DatabaseConfig:
             )
 
         return result
+
+    @staticmethod
+    def _get_bool_env(name: str, default: bool) -> bool:
+        value = os.getenv(name)
+
+        if value is None or not value.strip():
+            return default
+
+        normalized_value = value.strip().lower()
+
+        if normalized_value in {"1", "true", "yes", "on"}:
+            return True
+
+        if normalized_value in {"0", "false", "no", "off"}:
+            return False
+
+        raise ValueError(
+            f"Переменная окружения {name} должна содержать "
+            "true/false, yes/no, on/off или 1/0."
+        )

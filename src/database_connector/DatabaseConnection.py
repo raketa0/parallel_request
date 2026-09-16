@@ -7,6 +7,10 @@ class DatabaseConnection(ABC):
         self.config = config
         self.connection = None
 
+    @property
+    def label(self) -> str:
+        return f"{self.config.host}:{self.config.port}"
+
     @abstractmethod
     def connect(self) -> None:
         pass

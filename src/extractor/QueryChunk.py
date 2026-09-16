@@ -1,7 +1,8 @@
 from dataclasses import dataclass
 
-from chunk.TimeChunk import TimeChunk
 from query.QueryParameters import QueryParameters
+from time_chunks.TimeChunk import TimeChunk
+
 
 @dataclass(frozen=True)
 class QueryChunk:

@@ -1,8 +1,11 @@
-from concurrent.futures import ThreadPoolExecutor
+import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from queue import Queue
+from threading import Event
+
 import pandas as pd
-from chunk.ChunkGenerator import ChunkGenerator
+
 from database_connector.DatabaseConnection import DatabaseConnection
-from extractor.ChunkDistributor import ChunkDistributor
 from extractor.ExecutionConfig import ExecutionConfig
 from extractor.QueryChunk import QueryChunk
 from extractor.ResultCollector import ResultCollector
@@ -10,6 +13,7 @@ from extractor.ResultQueue import ResultQueue
 from extractor.ThreadWorker import ThreadWorker
 from query.QueryBuilder import QueryBuilder
 from request.ExtractionRequest import ExtractionRequest
+from time_chunks.ChunkGenerator import ChunkGenerator
 
 
 class ParallelExtractor:
@@ -19,7 +23,6 @@ class ParallelExtractor:
         execution_config: ExecutionConfig | None = None,
         chunk_generator: ChunkGenerator | None = None,
         query_builder: QueryBuilder | None = None,
-        chunk_distributor: ChunkDistributor | None = None,
     ) -> None:
 
         self.connection_factory = connection_factory
@@ -42,12 +45,6 @@ class ParallelExtractor:
             else QueryBuilder()
         )
 
-        self.chunk_distributor = (
-            chunk_distributor
-            if chunk_distributor is not None
-            else ChunkDistributor()
-        )
-
     def extract(
         self,
         request: ExtractionRequest,
@@ -67,43 +64,69 @@ class ParallelExtractor:
             chunks=chunks,
         )
 
-        distributed_queries = (
-            self.chunk_distributor.distribute_queries(
-                query_chunks=query_chunks,
-                workers=self.execution_config.max_workers,
-            )
+        worker_count = min(
+            self.execution_config.workers,
+            len(query_chunks),
+        )
+        query_queue: Queue[QueryChunk] = Queue()
+        result_queue = ResultQueue()
+        stop_event = Event()
+
+        for query_chunk in query_chunks:
+            query_queue.put(query_chunk)
+
+        print(
+            f"Чанков: {len(query_chunks)}. Воркеров: {worker_count} "
+            f"(общий лимит: {self.execution_config.workers}).",
+            flush=True,
         )
 
-        result_queue = ResultQueue()
-
         with ThreadPoolExecutor(
-            max_workers=len(distributed_queries),
+            max_workers=worker_count,
+            thread_name_prefix="db-worker",
         ) as executor:
-
             futures = []
 
-            for worker_queries in distributed_queries:
+            try:
+                for worker_index in range(worker_count):
+                    connection: DatabaseConnection = self.connection_factory()
+                    worker = ThreadWorker(
+                        connection=connection,
+                        result_queue=result_queue,
+                        worker_id=worker_index + 1,
+                    )
+                    futures.append(
+                        executor.submit(
+                            worker.execute,
+                            query_queue,
+                            stop_event,
+                        )
+                    )
 
-                connection: DatabaseConnection = (
-                    self.connection_factory()
-                )
+                for future in as_completed(futures):
+                    future.result()
 
-                worker = ThreadWorker(
-                    connection=connection,
-                    result_queue=result_queue,
-                )
+            except BaseException as error:
+                stop_event.set()
 
-                future = executor.submit(
-                    worker.execute,
-                    worker_queries,
-                )
+                for future in futures:
+                    future.cancel()
 
-                futures.append(future)
+                if isinstance(error, KeyboardInterrupt):
+                    print(
+                        "\nПолучено прерывание (KeyboardInterrupt). Выдача новых чанков остановлена. "
+                        "Ожидаю завершения уже запущенных запросов и закрытия соединений...",
+                        file=sys.stderr,
+                        flush=True,
+                    )
 
-            for future in futures:
+                raise
 
-                future.result()
-
+        print(
+            f"Все {worker_count} воркеров завершены. "
+            f"Объединяю результаты {len(query_chunks)} чанков в DataFrame...",
+            flush=True,
+        )
         collector = ResultCollector(
             result_queue=result_queue,
         )
