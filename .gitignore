@@ -20,6 +20,7 @@ venv.bak/
 # Code analysis
 .mypy_cache/
 .ruff_cache/
+.ipynb_checkpoints/
 
 # Local editor settings
 .vscode/

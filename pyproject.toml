@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "parallel-request"
+version = "0.1.0"
+description = "Parallel queries to ClickHouse THEATRE returning pandas DataFrames"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+dynamic = ["dependencies"]
+
+[project.urls]
+Repository = "https://github.com/raketa0/parallel_request"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+include-package-data = false
+py-modules = ["DataExtractor"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = [
+    "parallel_request", "parallel_request.*",
+    "database_connector", "database_connector.*",
+    "extractor", "extractor.*",
+    "query", "query.*",
+    "request", "request.*",
+    "time_chunks", "time_chunks.*",
+]
+namespaces = false
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
