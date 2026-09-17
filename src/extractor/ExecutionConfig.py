@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class ExecutionConfig:
-    workers: int = 8
+    workers: int = 6
 
     def __post_init__(self) -> None:
 

@@ -11,9 +11,8 @@ from dotenv import dotenv_values
 from database_connector.ClickHouseConnection import ClickHouseConnection
 from database_connector.DatabaseConfig import (
     DatabaseConfig,
-    THEATRE_RU_DATABASE,
-    THEATRE_RU_HOSTS,
-    THEATRE_RU_PORT,
+    THEATRE_CONNECTIONS,
+    normalize_connection as _as_connection,
 )
 from extractor.ExecutionConfig import ExecutionConfig
 from extractor.ParallelExtractor import ParallelExtractor
@@ -27,29 +26,72 @@ def extract(
     end_date: str | date | datetime,
     *,
     chunk_type: str | TimeChunkType = "day",
-    workers: int = 8,
+    workers: int = 6,
     env_file: str | PathLike[str] | None = ".env",
+    conn: str = "THEATRE_RU",
 ) -> pd.DataFrame:
-    """Выполняет запрос по временным интервалам и возвращает один DataFrame.
+    """Выгрузить данные THEATRE_RU или THEATRE_ASIA в один pandas.DataFrame.
 
-    query должен содержать {start_date} и {end_date} без кавычек.
-    start_date включается в период, end_date не включается. Даты принимаются
-    как строки ISO (например, "2026-05-01"), date или datetime.
+    Делит период [start_date, end_date) на чанки, выполняет запросы параллельно
+    и объединяет результаты в памяти. Ожидает завершения всей выгрузки.
 
-    chunk_type: hour, day, week, month, quarter, year или TimeChunkType.
-    workers: общий лимит параллельных запросов, по умолчанию 8.
-    env_file: путь к .env относительно рабочей папки Jupyter или скрипта.
-        По умолчанию читается .env в этой папке. None отключает чтение файла.
-        Переменные окружения имеют приоритет над значениями из файла.
+    Args:
+        query: Непустой SQL с {start_date} и {end_date} без кавычек.
+            Не используйте f-строку или .format() для подстановки этих дат.
+        start_date: Включённое начало периода: строка ISO ("2026-05-01",
+            "2026-05-01T10:30:00"), date или datetime. date означает полночь.
+        end_date: Исключённый конец периода, в тех же форматах.
+            Должен быть позже start_date. Обе даты — с часовым поясом
+            или обе без него. Для всего мая укажите end_date="2026-06-01".
+        chunk_type: Размер чанка: "hour", "day", "week", "month",
+            "quarter", "year" или TimeChunkType. По умолчанию "day".
+            hour/day/week отсчитываются от начала периода; month/quarter/year
+            заканчиваются на календарных границах. Пустая строка недопустима.
+        workers: Общий максимум одновременных запросов на все серверы.
+            Целое число > 0, по умолчанию 6. Не больше количества чанков.
+            Воркеры распределяются по трём серверам выбранного региона
+            по кругу; workers=6 даёт по два на сервер при >= 6 чанках.
+        env_file: Путь к .env, по умолчанию ".env" в текущей рабочей папке.
+            Принимает str или PathLike; None — только переменные окружения.
+            Окружение имеет приоритет над файлом.
+        conn: "THEATRE_RU" (по умолчанию) или "THEATRE_ASIA".
+            Для RU нужны THEATRE_LOGIN_RU и THEATRE_PASS_RU;
+            для Asia — THEATRE_LOGIN_ASIA и THEATRE_PASS_ASIA.
+            Реквизиты другого региона не нужны. Порт 8123,
+            база BookingFormAnalyticsV2. Регистр conn не важен.
 
-    Требуются THEATRE_LOGIN_RU и THEATRE_PASS_RU. Результат хранится в памяти;
-    файлы не создаются. При ошибке исключение передаётся вызывающему коду.
+    Returns:
+        pandas.DataFrame: Результаты всех чанков в порядке их завершения,
+            с новым индексом и без общей сортировки. Файлы не создаются.
+            Весь результат должен помещаться в памяти.
 
-    Пример:
-        df = extract(query, "2026-05-01", "2026-05-17")
+    Raises:
+        TypeError: Неподдерживаемый тип query, start_date или end_date.
+        ValueError: Неверные даты, workers, chunk_type, conn, шаблоны SQL
+            или отсутствующие реквизиты выбранного региона.
+        Exception: Ошибка драйвера при подключении или выполнении SQL.
+            Исключение передаётся вызывающему коду без частичного результата.
+
+    Notes:
+        Агрегации, LIMIT и ORDER BY выполняются отдельно для каждого чанка.
+        Объединение не пересчитывает общий итог и не удаляет дубликаты.
+        При прерывании выдача новых чанков прекращается; уже запущенные
+        запросы завершаются перед закрытием соединений.
+        Все параметры после end_date передаются только по имени.
+
+    Examples:
+        >>> query = ("SELECT * FROM your_table "
+        ...          "WHERE created_at >= {start_date} "
+        ...          "AND created_at < {end_date}")
+        >>> df = extract(query, "2026-05-01", "2026-05-18",
+        ...              conn="THEATRE_ASIA", chunk_type="day", workers=6)
+        >>> df = extract(query, "2026-05-01", "2026-06-01",
+        ...              conn="THEATRE_RU", env_file="D:/settings/theatre.env")
     """
     if not isinstance(query, str):
         raise TypeError("query должен быть строкой SQL-запроса.")
+
+    conn = _as_connection(conn)
 
     start = _as_datetime(start_date, "start_date")
     end = _as_datetime(end_date, "end_date")
@@ -63,8 +105,9 @@ def extract(
         chunk_type=_as_chunk_type(chunk_type),
     )
     execution_config = ExecutionConfig(workers=workers)
-    config = _load_config(env_file)
-    configs = cycle(replace(config, host=host) for host in THEATRE_RU_HOSTS)
+    config = _load_config(env_file, conn)
+    hosts = THEATRE_CONNECTIONS[conn][0]
+    configs = cycle(replace(config, host=host) for host in hosts)
 
     # Существующий механизм очереди, выполнения и объединения не меняется.
     return ParallelExtractor(
@@ -73,7 +116,10 @@ def extract(
     ).extract(request)
 
 
-def _load_config(env_file: str | PathLike[str] | None) -> DatabaseConfig:
+def _load_config(
+    env_file: str | PathLike[str] | None, conn: str = "THEATRE_RU"
+) -> DatabaseConfig:
+    hosts, port, database, region = THEATRE_CONNECTIONS[_as_connection(conn)]
     file_values = (
         dotenv_values(Path(env_file).expanduser(), encoding="utf-8-sig")
         if env_file is not None
@@ -90,11 +136,11 @@ def _load_config(env_file: str | PathLike[str] | None) -> DatabaseConfig:
         return value
 
     return DatabaseConfig(
-        host=THEATRE_RU_HOSTS[0],
-        port=THEATRE_RU_PORT,
-        database=THEATRE_RU_DATABASE,
-        username=credential("THEATRE_LOGIN_RU"),
-        password=credential("THEATRE_PASS_RU"),
+        host=hosts[0],
+        port=port,
+        database=database,
+        username=credential(f"THEATRE_LOGIN_{region}"),
+        password=credential(f"THEATRE_PASS_{region}"),
     )
 
 
